@@ -1,12 +1,5 @@
-﻿
-using UnityEditor.VersionControl;
+using System.Collections;
 using UnityEngine;
-
-/*
-    This file has a commented version with details about how each line works. 
-    The commented version contains code that is easier and simpler to read. This file is minified.
-*/
-
 
 /// <summary>
 /// Main script for third-person movement of the character in the game.
@@ -15,7 +8,6 @@ using UnityEngine;
 /// </summary>
 public class ThirdPersonController : MonoBehaviour
 {
-
     [Tooltip("Speed ​​at which the character moves. It is not affected by gravity or jumping.")]
     public float velocity = 5f;
     [Tooltip("This value is added to the speed value while the character is sprinting.")]
@@ -34,6 +26,8 @@ public class ThirdPersonController : MonoBehaviour
     bool isJumping = false;
     bool isSprinting = false;
     bool isCrouching = false;
+    bool isAttacking = false;
+    bool isShielding = false;
 
     // Inputs
     float inputHorizontal;
@@ -41,10 +35,14 @@ public class ThirdPersonController : MonoBehaviour
     bool inputJump;
     bool inputCrouch;
     bool inputSprint;
+    bool inputAttack;
+    bool inputShield;
 
     Animator animator;
     CharacterController cc;
 
+    [Tooltip("Transform for the shield to activate/deactivate")]
+    public Transform shieldTransform;
 
     void Start()
     {
@@ -54,71 +52,84 @@ public class ThirdPersonController : MonoBehaviour
         // Message informing the user that they forgot to add an animator
         if (animator == null)
             Debug.LogWarning("Hey buddy, you don't have the Animator component in your player. Without it, the animations won't work.");
+
+        // Ensure the shieldTransform is deactivated at the start
+        if (shieldTransform != null)
+            shieldTransform.gameObject.SetActive(false);
     }
 
-
-    // Update is only being used here to identify keys and trigger animations
     void Update()
     {
-
         // Input checkers
         inputHorizontal = Input.GetAxis("Horizontal");
         inputVertical = Input.GetAxis("Vertical");
         inputJump = Input.GetAxis("Jump") == 1f;
         inputSprint = Input.GetAxis("Fire3") == 1f;
-        // Unfortunately GetAxis does not work with GetKeyDown, so inputs must be taken individually
+        inputAttack = Input.GetKeyDown(KeyCode.Q);
+        inputShield = Input.GetKey(KeyCode.F); // Holding F for shielding
         inputCrouch = Input.GetKeyDown(KeyCode.LeftControl) || Input.GetKeyDown(KeyCode.JoystickButton1);
 
         // Check if you pressed the crouch input key and change the player's state
-        if ( inputCrouch )
+        if (inputCrouch)
             isCrouching = !isCrouching;
+
+        // Handle attack input
+        if (inputAttack && !isAttacking)
+        {
+            StartCoroutine(Attack());
+        }
+
+        // Handle shield input
+        if (inputShield && !isShielding)
+        {
+            StartCoroutine(Shield());
+        }
+        else if (!inputShield && isShielding)
+        {
+            StopShield();
+        }
 
         // Run and Crouch animation
         // If dont have animator component, this block wont run
-        if ( cc.isGrounded && animator != null )
+        if (cc.isGrounded && animator != null)
         {
-
             // Crouch
             // Note: The crouch animation does not shrink the character's collider
             animator.SetBool("crouch", isCrouching);
-            
+
             // Run
             float minimumSpeed = 0.9f;
-            animator.SetBool("run", cc.velocity.magnitude > minimumSpeed );
+            animator.SetBool("run", cc.velocity.magnitude > minimumSpeed);
 
             // Sprint
             isSprinting = cc.velocity.magnitude > minimumSpeed && inputSprint;
-            animator.SetBool("sprint", isSprinting );
-
+            animator.SetBool("sprint", isSprinting);
         }
 
         // Jump animation
-        if( animator != null )
-            animator.SetBool("air", cc.isGrounded == false );
+        if (animator != null)
+            animator.SetBool("air", cc.isGrounded == false);
 
         // Handle can jump or not
-        if ( inputJump && cc.isGrounded )
+        if (inputJump && cc.isGrounded)
         {
             isJumping = true;
-            // Disable crounching when jumping
+            // Disable crouching when jumping
             //isCrouching = false; 
         }
 
         HeadHittingDetect();
-
     }
-
 
     // With the inputs and animations defined, FixedUpdate is responsible for applying movements and actions to the player
     private void FixedUpdate()
     {
-
-        // Sprinting velocity boost or crounching desacelerate
+        // Sprinting velocity boost or crouching desacelerate
         float velocityAdittion = 0;
-        if ( isSprinting )
+        if (isSprinting)
             velocityAdittion = sprintAdittion;
         if (isCrouching)
-            velocityAdittion =  - (velocity * 0.50f); // -50% velocity
+            velocityAdittion = -(velocity * 0.50f); // -50% velocity
 
         // Direction movement
         float directionX = inputHorizontal * (velocity + velocityAdittion) * Time.deltaTime;
@@ -126,9 +137,8 @@ public class ThirdPersonController : MonoBehaviour
         float directionY = 0;
 
         // Jump handler
-        if ( isJumping )
+        if (isJumping)
         {
-
             // Apply inertia and smoothness when climbing the jump
             // It is not necessary when descending, as gravity itself will gradually pulls
             directionY = Mathf.SmoothStep(jumpForce, jumpForce * 0.30f, jumpElapsedTime / jumpTime) * Time.deltaTime;
@@ -145,7 +155,6 @@ public class ThirdPersonController : MonoBehaviour
         // Add gravity to Y axis
         directionY = directionY - gravity * Time.deltaTime;
 
-        
         // --- Character rotation --- 
 
         Vector3 forward = Camera.main.transform.forward;
@@ -170,15 +179,12 @@ public class ThirdPersonController : MonoBehaviour
 
         // --- End rotation ---
 
-        
         Vector3 verticalDirection = Vector3.up * directionY;
         Vector3 horizontalDirection = forward + right;
 
         Vector3 moviment = verticalDirection + horizontalDirection;
-        cc.Move( moviment );
-
+        cc.Move(moviment);
     }
-
 
     //This function makes the character end his jump if he hits his head on something
     void HeadHittingDetect()
@@ -197,4 +203,48 @@ public class ThirdPersonController : MonoBehaviour
         }
     }
 
+    IEnumerator Attack()
+    {
+        isAttacking = true;
+        animator.SetTrigger("attack");
+        yield return new WaitForSeconds(1f); // Adjust the duration of the attack animation
+        isAttacking = false;
+    }
+
+    IEnumerator Shield()
+    {
+        isShielding = true;
+        animator.SetBool("shield", true);
+        if (shieldTransform != null)
+            shieldTransform.gameObject.SetActive(true);
+
+        yield return null;
+    }
+
+    void StopShield()
+    {
+        isShielding = false;
+        animator.SetBool("shield", false);
+        if (shieldTransform != null)
+            shieldTransform.gameObject.SetActive(false);
+    }
+
+    public void damage(int damageAmount)
+    {
+        // Implement damage logic here, such as reducing health
+        Debug.Log("Player takes " + damageAmount + " damage.");
+    }
+
+    // Collision detection with enemy
+    private void OnTriggerEnter(Collider other)
+    {
+        if (isAttacking && other.CompareTag("Enemy"))
+        {
+            Enemy enemy = other.GetComponent<Enemy>();
+            if (enemy != null)
+            {
+                enemy.damage(10);
+            }
+        }
+    }
 }
